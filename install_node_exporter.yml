@@ -1,0 +1,76 @@
+---
+- name: Install Node Exporter on Amazon Linux
+  hosts: all
+  become: yes
+
+  vars:
+    node_exporter_version: "1.5.0"
+    node_exporter_archive: "node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+    node_exporter_dir: "node_exporter-{{ node_exporter_version }}.linux-amd64"
+
+  tasks:
+
+    - name: Download Node Exporter archive
+      get_url:
+        url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/{{ node_exporter_archive }}"
+        dest: "/tmp/{{ node_exporter_archive }}"
+
+    - name: Extract archive
+      unarchive:
+        src: "/tmp/{{ node_exporter_archive }}"
+        dest: "/tmp/"
+        remote_src: yes
+
+    - name: Move binary to /usr/local/bin
+      copy:
+        src: "/tmp/{{ node_exporter_dir }}/node_exporter"
+        dest: "/usr/local/bin/node_exporter"
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: Remove extracted folder and tar
+      file:
+        path: "/tmp/{{ item }}"
+        state: absent
+      loop:
+        - "{{ node_exporter_dir }}"
+        - "{{ node_exporter_archive }}"
+
+    - name: Create node_exporter user
+      user:
+        name: node_exporter
+        shell: /bin/false
+        system: yes
+        create_home: no
+
+    - name: Create systemd service file
+      copy:
+        dest: /etc/systemd/system/node_exporter.service
+        content: |
+          [Unit]
+          Description=Node Exporter
+          After=network.target
+
+          [Service]
+          User=node_exporter
+          Group=node_exporter
+          Type=simple
+          ExecStart=/usr/local/bin/node_exporter
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable node_exporter service
+      systemd:
+        name: node_exporter
+        enabled: yes
+
+    - name: Start node_exporter service
+      systemd:
+        name: node_exporter
+        state: started
