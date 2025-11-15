@@ -1,0 +1,192 @@
+---
+- name: Install Prometheus and Grafana on Amazon Linux
+  hosts: all
+  become: yes
+  vars:
+    prometheus_version: "2.43.0"
+    prometheus_archive: "prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+    prometheus_dir: "prometheus-{{ prometheus_version }}.linux-amd64"
+    prometheus_tmp: "/tmp/{{ prometheus_dir }}"
+    prometheus_archive_tmp: "/tmp/{{ prometheus_archive }}"
+
+  tasks:
+    # ---------------------------
+    # PROMETHEUS
+    # ---------------------------
+    - name: Ensure /tmp exists (safety)
+      file:
+        path: /tmp
+        state: directory
+
+    - name: Download Prometheus archive
+      get_url:
+        url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/{{ prometheus_archive }}"
+        dest: "{{ prometheus_archive_tmp }}"
+        mode: '0644'
+      register: download_prometheus
+
+    - name: Extract Prometheus archive
+      unarchive:
+        src: "{{ prometheus_archive_tmp }}"
+        dest: /tmp
+        remote_src: yes
+      when: download_prometheus is changed
+
+    - name: Create prometheus system user
+      user:
+        name: prometheus
+        system: yes
+        shell: /bin/false
+        create_home: no
+
+    - name: Move prometheus binary if not present
+      command: mv "{{ prometheus_tmp }}/prometheus" /usr/local/bin/prometheus
+      args:
+        creates: /usr/local/bin/prometheus
+
+    - name: Move promtool binary if not present
+      command: mv "{{ prometheus_tmp }}/promtool" /usr/local/bin/promtool
+      args:
+        creates: /usr/local/bin/promtool
+
+    - name: Ensure /etc/prometheus exists
+      file:
+        path: /etc/prometheus
+        state: directory
+        owner: prometheus
+        group: prometheus
+        mode: '0755'
+
+    - name: Ensure /var/lib/prometheus exists
+      file:
+        path: /var/lib/prometheus
+        state: directory
+        owner: prometheus
+        group: prometheus
+        mode: '0755'
+
+    - name: Move console_libraries if not present
+      command: mv "{{ prometheus_tmp }}/console_libraries" /etc/prometheus/console_libraries
+      args:
+        creates: /etc/prometheus/console_libraries
+      ignore_errors: yes
+
+    - name: Move consoles if not present
+      command: mv "{{ prometheus_tmp }}/consoles" /etc/prometheus/consoles
+      args:
+        creates: /etc/prometheus/consoles
+      ignore_errors: yes
+
+    - name: Remove Prometheus temp folder and archive
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ prometheus_tmp }}"
+        - "{{ prometheus_archive_tmp }}"
+
+    - name: Create Prometheus config file
+      copy:
+        dest: /etc/prometheus/prometheus.yml
+        owner: prometheus
+        group: prometheus
+        mode: '0644'
+        content: |
+          global:
+            scrape_interval: 10s
+
+          scrape_configs:
+            - job_name: 'prometheus_metrics'
+              scrape_interval: 5s
+              static_configs:
+                - targets: ['localhost:9090']
+
+            - job_name: 'node_exporter_metrics'
+              scrape_interval: 5s
+              static_configs:
+                - targets: ['localhost:9100','worker-1:9100','worker-2:9100']
+
+    - name: Create Prometheus systemd unit
+      copy:
+        dest: /etc/systemd/system/prometheus.service
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Prometheus
+          After=network.target
+
+          [Service]
+          User=prometheus
+          Group=prometheus
+          Type=simple
+          ExecStart=/usr/local/bin/prometheus \
+              --config.file /etc/prometheus/prometheus.yml \
+              --storage.tsdb.path /var/lib/prometheus/ \
+              --web.console.templates=/etc/prometheus/consoles \
+              --web.console.libraries=/etc/prometheus/console_libraries
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable and start Prometheus
+      systemd:
+        name: prometheus
+        enabled: yes
+        state: started
+        daemon_reload: no
+
+    # ---------------------------
+    # GRAFANA
+    # ---------------------------
+    - name: Download Grafana GPG key
+      get_url:
+        url: "https://rpm.grafana.com/gpg.key"
+        dest: "/tmp/grafana_gpg.key"
+        mode: '0644'
+
+    - name: Import Grafana GPG key
+      rpm_key:
+        state: present
+        key: /tmp/grafana_gpg.key
+
+    - name: Create Grafana repo file
+      copy:
+        dest: /etc/yum.repos.d/grafana.repo
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [grafana]
+          name=grafana
+          baseurl=https://rpm.grafana.com
+          repo_gpgcheck=1
+          enabled=1
+          gpgcheck=1
+          gpgkey=https://rpm.grafana.com/gpg.key
+          sslverify=1
+          sslcacert=/etc/pki/tls/certs/ca-bundle.crt
+
+    - name: Install Grafana
+      yum:
+        name: grafana
+        state: present
+
+    - name: Enable and start Grafana
+      systemd:
+        name: grafana-server
+        enabled: yes
+        state: started
+
+    # ---------------------------
+    # Cleanup
+    # ---------------------------
+    - name: Remove temporary grafana gpg key
+      file:
+        path: /tmp/grafana_gpg.key
+        state: absent
