@@ -10,3 +10,9 @@ echo "export PATH=$PATH:/usr/local/bin/" >> source .bashrc
 export KOPS_STATE_STORE=s3://rushi-for-kubernetes.k8s.local
 kops create cluster --name yogesh.k8s.local --zones eu-north-1a --control-plane-image ami-0f50f13aefb6c0a5d --control-plane-count=1 --control-plane-size c7i-flex.large --image ami-0f50f13aefb6c0a5d --node-count=2 --node-size c7i-flex.large
 kops update cluster --name yogesh.k8s.local --yes --admin
+------------------------------------------------------------------
+# After script 
+ 11  export KOPS_STATE_STORE=s3://rushi-for-kubernetes.k8s.local
+   12  kops validate cluster --name yogesh.k8s.local --state s3://rushi-for-kubernetes.k8s.local
+   13  kops validate cluster --wait 10m
+   14  kops get cluster
