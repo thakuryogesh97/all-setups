@@ -13,6 +13,6 @@ kops update cluster --name yogesh1.k8s.local --yes
 ------------------------------------------------------------------
 # After script 
  11  export KOPS_STATE_STORE=s3://kops-for-cluster.k8s.local
-   12  kops validate cluster --name yogesh.k8s.local --state s3://kops-for-cluster.k8s.local
+   12  kops validate cluster --name yogesh1.k8s.local --state s3://kops-for-cluster.k8s.local
    13  kops validate cluster --wait 10m
    14  kops get cluster
